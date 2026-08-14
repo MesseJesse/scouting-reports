@@ -1,17 +1,76 @@
 import requests
 import sys
 
-player_id = sys.argv[1]
-url = f"https://www.fotmob.com/api/data/playerData?id={player_id}"
 
-response = requests.get(url)
-player = response.json()
+def get_player_data(player_id):
+    url = f"https://www.fotmob.com/api/data/playerData?id={player_id}"
+
+    response = requests.get(url)
+    response.raise_for_status()
+
+    return response.json()
+
+
+def get_season_stats(player_id, season_id):
+    url = "https://www.fotmob.com/api/data/playerStats"
+
+    params = {
+        "playerId": player_id,
+        "seasonId": season_id,
+        "isFirstSeason": "false",
+    }
+
+    response = requests.get(url, params=params)
+    response.raise_for_status()
+
+    return response.json()
+
+def get_season_stats(player_id, entry_id):
+    url = (
+        f"https://www.fotmob.com/api/data/playerStats"
+        f"?playerId={player_id}"
+        f"&seasonId={entry_id}"
+        f"&isFirstSeason=false"
+    )
+
+    response = requests.get(url)
+    response.raise_for_status()
+
+    return response.json()
+
+def extract_deep_season_stats(stats):
+    performance = {}
+
+    for group in stats["statsSection"]["items"]:
+        group_name = group["title"].lower()
+
+        performance[group_name] = {}
+
+        for stat in group["items"]:
+            performance[group_name][stat["title"]] = {
+                "total": stat["statValue"],
+                "per90": stat.get("per90"),
+            }
+
+    return performance
+
+def extract_season_summary(stats):
+    summary = {}
+
+    for stat in stats["topStatCard"]["items"]:
+        summary[stat["title"]] = {
+            "total": stat["statValue"],
+            "per90": stat.get("per90"),
+        }
+
+    return summary
 
 def get_stat(stats, stat_name):
     for stat in stats:
         if stat["title"] == stat_name:
             return stat["statValue"]
     return None
+
 
 def extract_player_info(player):
     information = player["playerInformation"]
@@ -32,6 +91,7 @@ def extract_player_info(player):
         "contract_end": contract_end,
     }
 
+
 def extract_position(player):
     position = player["positionDescription"]
 
@@ -43,32 +103,65 @@ def extract_position(player):
         ]
     }
 
-def extract_current_season(player):
-    stats = player["firstSeasonStats"]["topStatCard"]["items"]
 
-    return {
-        "goals": get_stat(stats, "Goals"),
-        "assists": get_stat(stats, "Assists"),
-        "rating": get_stat(stats, "Rating"),
-        "matches": get_stat(stats, "Matches"),
-        "started": get_stat(stats, "Started"),
-        "minutes": get_stat(stats, "Minutes"),
-    }
+def extract_stat_seasons(player):
+    seasons = []
 
-def extract_season_performance(player):
-    stats_section = player["firstSeasonStats"]["statsSection"]
+    for season in player["statSeasons"]:
+        for tournament in season["tournaments"]:
+            seasons.append({
+                "season": season["seasonName"],
+                "tournament": tournament["name"],
+                "tournament_id": tournament["tournamentId"],
+                "entry_id": tournament["entryId"],
+                "has_deep_stats": tournament["hasDeepStats"],
+            })
 
+    return seasons
+
+
+def select_season(stat_seasons):
+    print("\n===== AVAILABLE STAT SEASONS =====")
+
+    for index, season in enumerate(stat_seasons, start=1):
+        print(
+            f"{index}. "
+            f"{season['season']} | "
+            f"{season['tournament']} | "
+            f"Deep stats: {season['has_deep_stats']}"
+        )
+
+    while True:
+        choice = input("\nSelect a season: ")
+
+        try:
+            choice = int(choice)
+
+            if 1 <= choice <= len(stat_seasons):
+                return stat_seasons[choice - 1]
+
+        except ValueError:
+            pass
+
+        print("Invalid selection. Please enter one of the numbers above.")
+
+
+def extract_season_performance(stats):
     performance = {}
 
-    for group in stats_section["items"]:
+    for group in stats["statsSection"]["items"]:
         group_name = group["title"].lower()
 
         performance[group_name] = {}
 
         for stat in group["items"]:
-            performance[group_name][stat["title"]] = stat["statValue"]
+            performance[group_name][stat["title"]] = {
+                "total": stat["statValue"],
+                "per90": stat["per90"],
+            }
 
     return performance
+
 
 def extract_career(player):
     seasons = player["careerHistory"]["careerItems"]["senior"]["seasonEntries"]
@@ -82,10 +175,13 @@ def extract_career(player):
             "appearances": season["appearances"],
             "goals": season["goals"],
             "assists": season["assists"],
-            "rating": season["rating"].get("rating") if season.get("rating") else None,
+            "rating": season["rating"].get("rating")
+            if season.get("rating")
+            else None,
         })
 
     return career
+
 
 def extract_recent_matches(player):
     matches = player["recentMatches"]
@@ -111,6 +207,7 @@ def extract_recent_matches(player):
 
     return recent_matches
 
+
 def extract_shots(player):
     shots = player["firstSeasonStats"]["shotmap"]
 
@@ -133,99 +230,187 @@ def extract_shots(player):
 
     return shot_data
 
-player_info = extract_player_info(player)
 
-position_info = extract_position(player)
+def build_player_data(player):
+    player_info = extract_player_info(player)
+    position_info = extract_position(player)
+    stat_seasons = extract_stat_seasons(player)
+    career = extract_career(player)
+    recent_matches = extract_recent_matches(player)
+    shots = extract_shots(player)
 
-current_season = extract_current_season(player)
+    return {
+        "info": player_info,
+        "position": position_info,
+        "stat_seasons": stat_seasons,
+        "career": career,
+        "recent_matches": recent_matches,
+        "shots": shots,
+    }
 
-season_performance = extract_season_performance(player)
+def main():
+    player_id = sys.argv[1]
 
-career = extract_career(player)
+    player = get_player_data(player_id)
 
-recent_matches = extract_recent_matches(player)
+    player_data = build_player_data(player)
 
-shots = extract_shots(player)
+    player_info = player_data["info"]
+    position_info = player_data["position"]
+    career = player_data["career"]
+    recent_matches = player_data["recent_matches"]
+    stat_seasons = player_data["stat_seasons"]
 
-player_data = {
-    "info": player_info,
-    "position": position_info,
-    "current_season": current_season,
-    "season_performance": season_performance,
-    "career": career,
-    "recent_matches": recent_matches,
-    "shots": shots
-}
+    print("\n===== AVAILABLE STAT SEASONS =====")
 
-print("\n===== PLAYER =====")
-print(f"Name: {player_info['name']}")
-print(f"Club: {player_info['club']}")
-print(f"Shirt: {player_info['shirt']}")
-print(f"Age: {player_info['age']}")
-print(f"Preferred foot: {player_info['preferred_foot']}")
-print(f"Country: {player_info['country']}")
-print(f"Market value: {player_info['market_value']}")
-print(f"Contract end: {player_info['contract_end']}")
+    for season in stat_seasons:
+        print(
+            f"{season['season']} | "
+            f"{season['tournament']} | "
+            f"Entry ID: {season['entry_id']} | "
+            f"Deep stats: {season['has_deep_stats']}"
+        )
 
-print("\n===== POSITION =====")
-print(f"Primary: {position_info['primary']}")
+    entry_id = input("\nEnter season Entry ID: ").strip()
 
-print("Secondary:")
-
-for position in position_info["secondary"]:
-    print(f"  {position}")
-
-print("\n===== CURRENT SEASON =====")
-print(f"Goals: {current_season['goals']}")
-print(f"Assists: {current_season['assists']}")
-print(f"Rating: {current_season['rating']}")
-print(f"Matches: {current_season['matches']}")
-print(f"Started: {current_season['started']}")
-print(f"Minutes: {current_season['minutes']}")
-
-print("\n===== SEASON PERFORMANCE =====")
-
-for group_name, stats in season_performance.items():
-    print(f"\n{group_name.title()}")
-
-    for stat_name, stat_value in stats.items():
-        print(f"  {stat_name}: {stat_value}")
-
-print("\n===== CAREER =====")
-
-for season in career:
-    rating = season["rating"] if season["rating"] is not None else "N/A"
-
-    print(
-        f"{season['season']} | "
-        f"{season['team']} | "
-        f"{season['appearances']} apps | "
-        f"{season['goals']} goals | "
-        f"{season['assists']} assists | "
-        f"Rating: {rating}"
+    selected_season = next(
+        (
+            season
+            for season in stat_seasons
+            if season["entry_id"] == entry_id
+        ),
+        None
     )
 
-print("\n===== RECENT MATCHES =====")
+    if selected_season is None:
+        print(f"\nInvalid Entry ID: {entry_id}")
+        return
 
-for match in recent_matches:
     print(
-        f"{match['date']} | "
-        f"{match['team']} vs {match['opponent']} | "
-        f"{match['score']} | "
-        f"{match['minutes']} mins | "
-        f"{match['goals']} goals | "
-        f"{match['assists']} assists | "
-        f"Rating: {match['rating']}"
+        f"\nFetching deep stats for "
+        f"{selected_season['season']} — "
+        f"{selected_season['tournament']}..."
     )
 
-print("\n===== SHOTS =====")
+    stats = get_season_stats(player_id, entry_id)
 
-for shot in shots:
+    season_summary = extract_season_summary(stats)
+    deep_stats = extract_deep_season_stats(stats)
+
+    print("\n===== SELECTED SEASON =====")
+    print(f"Season: {selected_season['season']}")
+    print(f"Tournament: {selected_season['tournament']}")
+    print(f"Entry ID: {selected_season['entry_id']}")
+
+    print("\n===== SEASON SUMMARY =====")
+
+    for stat_name, values in season_summary.items():
+        print(
+            f"{stat_name}: "
+            f"total={values['total']} | "
+            f"per90={values['per90']}"
+        )
+
+    print("\n===== DEEP SEASON STATS =====")
+
+    for group_name, stats_group in deep_stats.items():
+        print(f"\n{group_name.title()}")
+
+        for stat_name, values in stats_group.items():
+            print(
+                f"  {stat_name}: "
+                f"total={values['total']} | "
+                f"per90={values['per90']}"
+            )
+
+    print("\n===== PLAYER =====")
+    print(f"Name: {player_info['name']}")
+    print(f"Club: {player_info['club']}")
+    print(f"Shirt: {player_info['shirt']}")
+    print(f"Age: {player_info['age']}")
+    print(f"Preferred foot: {player_info['preferred_foot']}")
+    print(f"Country: {player_info['country']}")
+    print(f"Market value: {player_info['market_value']}")
+    print(f"Contract end: {player_info['contract_end']}")
+
+    print("\n===== POSITION =====")
+    print(f"Primary: {position_info['primary']}")
+
+    print("Secondary:")
+
+    for position in position_info["secondary"]:
+        print(f"  {position}")
+
+    selected_season = select_season(stat_seasons)
+
     print(
-        f"{shot['event']} | "
-        f"{shot['shot_type']} | "
-        f"{shot['situation']} | "
-        f"xG: {shot['expected_goals']:.3f} | "
-        f"Minute: {shot['minute']} | "
-        f"On target: {shot['is_on_target']}"
+        f"\nSelected: "
+        f"{selected_season['season']} | "
+        f"{selected_season['tournament']}"
     )
+
+    season_stats = get_season_stats(
+        player_id,
+        selected_season["entry_id"]
+    )
+
+    season_performance = extract_season_performance(season_stats)
+
+    print("\n===== SELECTED SEASON =====")
+
+    for group_name, stats in season_performance.items():
+        print(f"\n{group_name.title()}")
+
+        for stat_name, stat_values in stats.items():
+            print(
+                f"  {stat_name}: "
+                f"total={stat_values['total']} | "
+                f"per90={stat_values['per90']}"
+            )
+
+    print("\n===== CAREER =====")
+
+    for season in career:
+        rating = (
+            season["rating"]
+            if season["rating"] is not None
+            else "N/A"
+        )
+
+        print(
+            f"{season['season']} | "
+            f"{season['team']} | "
+            f"{season['appearances']} apps | "
+            f"{season['goals']} goals | "
+            f"{season['assists']} assists | "
+            f"Rating: {rating}"
+        )
+
+    print("\n===== RECENT MATCHES =====")
+
+    for match in recent_matches:
+        print(
+            f"{match['date']} | "
+            f"{match['team']} vs {match['opponent']} | "
+            f"{match['score']} | "
+            f"{match['minutes']} mins | "
+            f"{match['goals']} goals | "
+            f"{match['assists']} assists | "
+            f"Rating: {match['rating']}"
+        )
+
+    print("\n===== SHOTS =====")
+
+    for shot in shots:
+        print(
+            f"{shot['event']} | "
+            f"{shot['shot_type']} | "
+            f"{shot['situation']} | "
+            f"xG: {shot['expected_goals']:.3f} | "
+            f"Minute: {shot['minute']} | "
+            f"On target: {shot['is_on_target']}"
+        )
+
+
+if __name__ == "__main__":
+    main()
