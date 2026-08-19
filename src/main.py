@@ -1,6 +1,7 @@
 import requests
 import sys
-
+import pandas as pd
+import re
 
 def get_player_data(player_id):
     url = f"https://www.fotmob.com/api/data/playerData?id={player_id}"
@@ -53,6 +54,84 @@ def extract_deep_season_stats(stats):
             }
 
     return performance
+
+def flatten_season_stats(deep_stats):
+    flat_stats = {}
+
+    for group_name, stats_group in deep_stats.items():
+        for stat_name, values in stats_group.items():
+
+            key = stat_name.lower().replace(" ", "_")
+
+            flat_stats[f"{key}_total"] = values["total"]
+            flat_stats[f"{key}_per90"] = values["per90"]
+
+    return flat_stats
+
+def build_scouting_record(flat_stats, player_info, position_info, selected_season):
+    selected_stats = [
+        "goals_total",
+        "goals_per90",
+        "penalty_goals_total",
+        "shots_total",
+        "shots_per90",
+        "shots_on_target_total",
+        "shots_on_target_per90",
+        "assists_total",
+        "assists_per90",
+        "accurate_passes_total",
+        "accurate_passes_per90",
+        "pass_accuracy_total",
+        "pass_accuracy_per90",
+        "duels_won_total",
+        "duels_won_per90",
+        "duels_won_pct_total",
+        "duels_won_pct_per90",
+        "aerials_won_total",
+        "aerials_won_per90",
+        "aerials_won_pct_total",
+        "aerials_won_pct_per90",
+        "touches_total",
+        "touches_per90",
+        "touches_in_opposition_box_total",
+        "touches_in_opposition_box_per90",
+        "fouls_won_total",
+        "fouls_won_per90",
+        "defensive_actions_total",
+        "defensive_actions_per90",
+        "blocked_scoring_attempt_total",
+        "blocked_scoring_attempt_per90",
+        "fouls_committed_total",
+        "fouls_committed_per90",
+        "recoveries_total",
+        "recoveries_per90",
+        "dribbled_past_total",
+        "dribbled_past_per90",
+        "clean_sheets_total",
+        "clean_sheets_per90",
+        "goals_conceded_while_on_pitch_total",
+        "goals_conceded_while_on_pitch_per90",
+        "yellow_cards_total",
+        "red_cards_total",
+    ]
+
+    record = {
+        "player_id": flat_stats["player_id"],
+        "player": player_info["name"],
+        "season": selected_season["season"],
+        "competition": selected_season["tournament"],
+        "position": position_info["primary"],
+    }
+
+    for stat in selected_stats:
+        value = flat_stats.get(stat)
+
+        if isinstance(value, (int, float)):
+            value = round(value, 2)
+
+        record[stat] = value
+
+    return record
 
 def extract_season_summary(stats):
     summary = {}
@@ -296,32 +375,50 @@ def main():
 
     season_summary = extract_season_summary(stats)
     deep_stats = extract_deep_season_stats(stats)
+    flat_stats = flatten_season_stats(deep_stats)
+
+    flat_stats["player_id"] = player_id
+
+    flat_stats["duels_won_pct_total"] = flat_stats.pop("duels_won_%_total")
+    flat_stats["duels_won_pct_per90"] = flat_stats.pop("duels_won_%_per90")
+    flat_stats["aerials_won_pct_total"] = flat_stats.pop("aerials_won_%_total")
+    flat_stats["aerials_won_pct_per90"] = flat_stats.pop("aerials_won_%_per90")
+
+    scouting_record = build_scouting_record(
+        flat_stats,
+        player_info,
+        position_info,
+        selected_season,    
+    )
+
+    df = pd.DataFrame([scouting_record])
+
+    player_name = re.sub(r"[^A-Za-z0-9]+", "_", player_info["name"]).strip("_")
+    filename = f"{player_name}_scouting_report.csv"
+
+    df.to_csv(
+        filename,
+        mode="a",
+        header=not pd.io.common.file_exists(filename),
+        index=False,
+    )
+
+    print(f"\n===== CSV RECORD SAVED =====")
+    print(f"File: {filename}")
+    print(df.to_string(index=False))
+
+    print("\n===== CSV RECORD SAVED =====")
+    print(df.to_string(index=False))
+
+    print("\n===== FLAT STATS =====")
+
+    for stat_name, value in flat_stats.items():
+        print(f"{stat_name}: {value}")
 
     print("\n===== SELECTED SEASON =====")
     print(f"Season: {selected_season['season']}")
     print(f"Tournament: {selected_season['tournament']}")
     print(f"Entry ID: {selected_season['entry_id']}")
-
-    print("\n===== SEASON SUMMARY =====")
-
-    for stat_name, values in season_summary.items():
-        print(
-            f"{stat_name}: "
-            f"total={values['total']} | "
-            f"per90={values['per90']}"
-        )
-
-    print("\n===== DEEP SEASON STATS =====")
-
-    for group_name, stats_group in deep_stats.items():
-        print(f"\n{group_name.title()}")
-
-        for stat_name, values in stats_group.items():
-            print(
-                f"  {stat_name}: "
-                f"total={values['total']} | "
-                f"per90={values['per90']}"
-            )
 
     print("\n===== PLAYER =====")
     print(f"Name: {player_info['name']}")
@@ -340,77 +437,6 @@ def main():
 
     for position in position_info["secondary"]:
         print(f"  {position}")
-
-    selected_season = select_season(stat_seasons)
-
-    print(
-        f"\nSelected: "
-        f"{selected_season['season']} | "
-        f"{selected_season['tournament']}"
-    )
-
-    season_stats = get_season_stats(
-        player_id,
-        selected_season["entry_id"]
-    )
-
-    season_performance = extract_season_performance(season_stats)
-
-    print("\n===== SELECTED SEASON =====")
-
-    for group_name, stats in season_performance.items():
-        print(f"\n{group_name.title()}")
-
-        for stat_name, stat_values in stats.items():
-            print(
-                f"  {stat_name}: "
-                f"total={stat_values['total']} | "
-                f"per90={stat_values['per90']}"
-            )
-
-    print("\n===== CAREER =====")
-
-    for season in career:
-        rating = (
-            season["rating"]
-            if season["rating"] is not None
-            else "N/A"
-        )
-
-        print(
-            f"{season['season']} | "
-            f"{season['team']} | "
-            f"{season['appearances']} apps | "
-            f"{season['goals']} goals | "
-            f"{season['assists']} assists | "
-            f"Rating: {rating}"
-        )
-
-    print("\n===== RECENT MATCHES =====")
-
-    for match in recent_matches:
-        print(
-            f"{match['date']} | "
-            f"{match['team']} vs {match['opponent']} | "
-            f"{match['score']} | "
-            f"{match['minutes']} mins | "
-            f"{match['goals']} goals | "
-            f"{match['assists']} assists | "
-            f"Rating: {match['rating']}"
-        )
-
-    print("\n===== SHOTS =====")
-
-    for shot in shots:
-        print(
-            f"{shot['event']} | "
-            f"{shot['shot_type']} | "
-            f"{shot['situation']} | "
-            f"xG: {shot['expected_goals']:.3f} | "
-            f"Minute: {shot['minute']} | "
-            f"On target: {shot['is_on_target']}"
-        )
-
 
 if __name__ == "__main__":
     main()
