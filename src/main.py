@@ -379,10 +379,18 @@ def main():
 
     flat_stats["player_id"] = player_id
 
-    flat_stats["duels_won_pct_total"] = flat_stats.pop("duels_won_%_total")
-    flat_stats["duels_won_pct_per90"] = flat_stats.pop("duels_won_%_per90")
-    flat_stats["aerials_won_pct_total"] = flat_stats.pop("aerials_won_%_total")
-    flat_stats["aerials_won_pct_per90"] = flat_stats.pop("aerials_won_%_per90")
+    flat_stats["duels_won_pct_total"] = flat_stats.pop(
+        "duels_won_%_total", None
+    )
+    flat_stats["duels_won_pct_per90"] = flat_stats.pop(
+        "duels_won_%_per90", None
+    )
+    flat_stats["aerials_won_pct_total"] = flat_stats.pop(
+        "aerials_won_%_total", None
+    )
+    flat_stats["aerials_won_pct_per90"] = flat_stats.pop(
+        "aerials_won_%_per90", None
+    )
 
     scouting_record = build_scouting_record(
         flat_stats,
@@ -396,10 +404,26 @@ def main():
     player_name = re.sub(r"[^A-Za-z0-9]+", "_", player_info["name"]).strip("_")
     filename = f"{player_name}_scouting_report.csv"
 
+    if pd.io.common.file_exists(filename):
+        existing_df = pd.read_csv(filename)
+
+        df = pd.concat([existing_df, df], ignore_index=True)
+
+        df["_season_order"] = (
+            df["season"]
+            .astype(str)
+            .str.extract(r"(\d{2})")[0]
+            .astype(int)
+        )
+
+        df = (
+            df.sort_values("_season_order")
+            .drop(columns="_season_order")
+            .reset_index(drop=True)
+        )
+
     df.to_csv(
         filename,
-        mode="a",
-        header=not pd.io.common.file_exists(filename),
         index=False,
     )
 
